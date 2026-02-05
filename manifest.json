@@ -2,8 +2,11 @@
   "manifest_version": 3,
   "name": "Kick Timestamps",
   "version": "1.0",
-  "description": "Helpful extension, that remembers the VODS you watched and allows you to resume them later from that timestamp.",
+  "description": "Helpful extension that remembers the VODs you watched and allows you to resume them later from that timestamp.",
   "author": "MPGod42",
+  "icons": {
+    "128": "assets/icon.png"
+  },
   "action": {
     "default_popup": "popup/popup.html"
   },
