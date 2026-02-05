@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Kick Timestamps",
+  "version": "1.0",
+  "description": "Helpful extension, that remembers the VODS you watched and allows you to resume them later from that timestamp.",
+  "author": "MPGod42",
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
+    "content_scripts": [
+        {
+        "matches": ["https://kick.com/*"],
+        "js": ["scripts/trackVODTime.js"]
+        }
+    ],
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://kick.com/*"
+  ]
+}
