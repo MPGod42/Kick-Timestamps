@@ -1,14 +1,31 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const visualizerToggle = document.getElementById('visualizerToggle');
     const debugToggle = document.getElementById('debugToggle');
     const exportBtn = document.getElementById('exportBtn');
     const importBtn = document.getElementById('importBtn');
     const fileInput = document.getElementById('fileInput');
     const statusMessage = document.getElementById('statusMessage');
 
+    // Load current visualizer setting (default to true)
+    chrome.storage.sync.get(['timestampVisualizerEnabled'], (result) => {
+        const isVisualizerEnabled = result.timestampVisualizerEnabled !== false;
+        updateToggleUI(visualizerToggle, isVisualizerEnabled);
+    });
+
     // Load current debug setting
     chrome.storage.sync.get(['debugLogging'], (result) => {
         const isDebugEnabled = result.debugLogging || false;
-        updateToggleUI(isDebugEnabled);
+        updateToggleUI(debugToggle, isDebugEnabled);
+    });
+
+    // Toggle visualizer
+    visualizerToggle.addEventListener('click', () => {
+        chrome.storage.sync.get(['timestampVisualizerEnabled'], (result) => {
+            const newState = result.timestampVisualizerEnabled !== false ? false : true;
+            chrome.storage.sync.set({ timestampVisualizerEnabled: newState }, () => {
+                updateToggleUI(visualizerToggle, newState);
+            });
+        });
     });
 
     // Toggle debug logging
@@ -16,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.sync.get(['debugLogging'], (result) => {
             const newState = !result.debugLogging;
             chrome.storage.sync.set({ debugLogging: newState }, () => {
-                updateToggleUI(newState);
+                updateToggleUI(debugToggle, newState);
             });
         });
     });
@@ -87,11 +104,11 @@ document.addEventListener('DOMContentLoaded', () => {
         event.target.value = '';
     });
 
-    function updateToggleUI(isEnabled) {
+    function updateToggleUI(toggleElement, isEnabled) {
         if (isEnabled) {
-            debugToggle.classList.add('enabled');
+            toggleElement.classList.add('enabled');
         } else {
-            debugToggle.classList.remove('enabled');
+            toggleElement.classList.remove('enabled');
         }
     }
 
