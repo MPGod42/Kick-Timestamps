@@ -1,16 +1,21 @@
 # Kick Timestamps
 
-A browser extension that helps track timestamps for Kick VODs.
+Never lose your spot in VODs again. Kick Timestamps automatically saves the timestamp where you left off and displays a subtle green bar under each video thumbnail so you can instantly see which videos you've partially watched.
 
-## Features
-- Simple, automatic, non invasive VOD resume feature.
-- Easy timestamp management (import/export)
+Features
 
-## Installation
-1. Clone or download this repository
-2. Load the extension in your browser:
-   - Chrome: Go to `chrome://extensions/`, enable "Developer mode", click "Load unpacked", select the extension folder
-   - Edge: Go to `edge://extensions/`, enable "Developer mode", click "Load unpacked", select the extension folder
+💾 Auto-save resume points — timestamps are saved automatically when you leave a VOD
+🟩 Visual progress bars — green indicators under thumbnails show watched progress at a glance
+⚡ Quick resume — pick up where you left off without searching through the timeline
+✨ Lightweight & non-intrusive — clean UI that stays out of the way
+🛡️ Crash recovery — if playback crashes or the page reloads unexpectedly, Kick Timestamps automatically restores and resumes playback at your saved timestamp so you don't lose progress
+
+How it works
+The extension saves your last-watched position for each VOD and overlays a small green indicator under thumbnails so you can quickly spot and resume partially watched videos.
+
+Privacy
+Respectful by design — minimal permissions and data stored locally (no unnecessary server uploads).
+
 
 
 ## License
