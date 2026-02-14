@@ -11,7 +11,8 @@ function trackVODTimeFunction() {
         currentVideoTimeHandler: null,
         saveTimeout: null,
         pendingListeners: null,
-        debugLogging: false
+        debugLogging: false,
+        userActive: false
     };
 
     // Helper function for debug logging
@@ -91,14 +92,42 @@ function trackVODTimeFunction() {
         }
     };
 
-    const startTrackingInterval = (videoId) => {
+    const startTrackingInterval = (videoId, savedTime) => {
         const currentVideo = document.querySelector("#video-player");
         if (!currentVideo) return;
 
         let isIgnoringUpdates = false;
 
+        // Set up user interaction detection on video player's parent (only once)
+        if (!window.KickVODTracker.userInteractionSetup) {
+            let userActivityTimeout;
+            const setUserActive = () => {
+                clearTimeout(userActivityTimeout);
+                window.KickVODTracker.userActive = true;
+                userActivityTimeout = setTimeout(() => {
+                    window.KickVODTracker.userActive = false;
+                }, 1000);
+            };
+            
+            window.addEventListener('pointerdown', setUserActive);
+            window.addEventListener('pointerup', setUserActive);
+            window.KickVODTracker.userInteractionSetup = true;
+        }
+
         const saveTimeHandler = () => {
+            const currentTime = currentVideo.currentTime;
             debugLog("[Kick VODS] timeupdate fired - isIgnoring:", isIgnoringUpdates, "loadedVideoId:", window.KickVODTracker.loadedVideoId, "currentVideoId:", videoId);
+            
+            // Auto-seek to saved timestamp if time is below 1 second and user isn't actively interacting
+            if (currentTime < 1 && !window.KickVODTracker.userActive && window.KickVODTracker.currentVideoTimeHandler?.savedTime !== undefined) {
+                debugLog("[Kick VODS] Auto-seeking to saved timestamp:", window.KickVODTracker.currentVideoTimeHandler.savedTime);
+                isIgnoringUpdates = true;
+                currentVideo.currentTime = window.KickVODTracker.currentVideoTimeHandler.savedTime;
+                setTimeout(() => {
+                    isIgnoringUpdates = false;
+                }, 2000);
+            }
+            
             if (isIgnoringUpdates || window.KickVODTracker.loadedVideoId !== videoId) {
                 debugLog("[Kick VODS] Skipping save - ignoring updates or wrong video");
                 return;
@@ -115,8 +144,18 @@ function trackVODTimeFunction() {
             debugLog("[Kick VODS] Setting up debounce timeout, will save in 1 second");
             window.KickVODTracker.saveTimeout = setTimeout(() => {
                 const currentTime = currentVideo.currentTime;
+                // Disable saving for the first 5 seconds
+                if (currentTime < 5) {
+                    debugLog("[Kick VODS] Skipping save - video time is below 5 seconds");
+                    window.KickVODTracker.saveTimeout = null;
+                    return;
+                }
                 debugLog("[Kick VODS] Saving time:", currentTime, "for video:", videoId);
                 saveWithRetry(videoId, currentTime);
+                // Update the saved time for auto-seek
+                if (window.KickVODTracker.currentVideoTimeHandler) {
+                    window.KickVODTracker.currentVideoTimeHandler.savedTime = currentTime;
+                }
                 window.KickVODTracker.saveTimeout = null;
             }, 1000);
         };
@@ -143,7 +182,8 @@ function trackVODTimeFunction() {
             seekingHandler: onSeeking,
             seekedHandler: onSeeked,
             ignoreFlag: () => { isIgnoringUpdates = true; }, 
-            unignoreFlag: () => { isIgnoringUpdates = false; } 
+            unignoreFlag: () => { isIgnoringUpdates = false; },
+            savedTime: savedTime
         };
     };
 
@@ -203,7 +243,7 @@ function trackVODTimeFunction() {
                         
                         debugLog("[Kick VODS] Initializing tracking for video:", videoId);
                         window.KickVODTracker.loadedVideoId = videoId;
-                        startTrackingInterval(videoId);
+                        startTrackingInterval(videoId, savedTime);
                         
                         if (savedTime !== undefined && window.KickVODTracker.currentVideoTimeHandler) {
                             debugLog("[Kick VODS] Seeking to saved time:", savedTime);
