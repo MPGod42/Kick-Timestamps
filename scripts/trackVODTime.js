@@ -7,6 +7,7 @@ function trackVODTimeFunction() {
         currentVideoId: null,
         loadedVideoId: null,
         isLoadingVideo: null,
+        boundElement: null,
         lastUrl: window.location.href,
         currentVideoTimeHandler: null,
         saveTimeout: null,
@@ -81,6 +82,25 @@ function trackVODTimeFunction() {
         window.KickVODTracker.currentVideoId = null;
         window.KickVODTracker.loadedVideoId = null;
         window.KickVODTracker.isLoadingVideo = null;
+        window.KickVODTracker.boundElement = null;
+    };
+
+    // #video-player is still the main element. Kick also mounts short ad videos
+    // and, after a player rebuild, can drop the id while leaving the <video> in
+    // the embedded player container.
+    const findPlayerVideo = () => {
+        const byId = document.getElementById('video-player');
+        if (byId instanceof HTMLVideoElement) return byId;
+
+        const embedded = document.querySelector('#injected-embedded-channel-player-video video');
+        if (embedded instanceof HTMLVideoElement) return embedded;
+
+        const candidates = [...document.querySelectorAll('video')].filter((video) => {
+            const src = video.currentSrc || video.src || '';
+            return !src.includes('black_2s.mp4');
+        });
+        candidates.sort((a, b) => (b.duration || 0) - (a.duration || 0));
+        return candidates.find((video) => video.duration > 5 || video.readyState > 0) || null;
     };
 
     const detectUrlChange = () => {
@@ -93,7 +113,7 @@ function trackVODTimeFunction() {
     };
 
     const startTrackingInterval = (videoId, savedTime) => {
-        const currentVideo = document.querySelector("#video-player");
+        const currentVideo = findPlayerVideo();
         if (!currentVideo) return;
 
         let isIgnoringUpdates = false;
@@ -144,12 +164,22 @@ function trackVODTimeFunction() {
             debugLog("[Kick VODS] Setting up debounce timeout, will save in 1 second");
             window.KickVODTracker.saveTimeout = setTimeout(() => {
                 const currentTime = currentVideo.currentTime;
+                const duration = currentVideo.duration;
+                
                 // Disable saving for the first 5 seconds
                 if (currentTime < 5) {
                     debugLog("[Kick VODS] Skipping save - video time is below 5 seconds");
                     window.KickVODTracker.saveTimeout = null;
                     return;
                 }
+                
+                // Disable saving for the last 5 seconds
+                if (duration && currentTime > duration - 5) {
+                    debugLog("[Kick VODS] Skipping save - video time is in last 5 seconds (", currentTime, "of", duration, ")");
+                    window.KickVODTracker.saveTimeout = null;
+                    return;
+                }
+                
                 debugLog("[Kick VODS] Saving time:", currentTime, "for video:", videoId);
                 saveWithRetry(videoId, currentTime);
                 // Update the saved time for auto-seek
@@ -187,24 +217,35 @@ function trackVODTimeFunction() {
         };
     };
 
-    const observer = new MutationObserver(() => {
+    const syncFromDom = () => {
         detectUrlChange();
         
-        const video = document.querySelector("#video-player");
+        const video = findPlayerVideo();
         const videoId = getVideoId(window.location.href);
+        const alreadyBound = video
+            && window.KickVODTracker.boundElement === video
+            && window.KickVODTracker.currentVideoId === videoId;
         
-        if (video && videoId && videoId !== window.KickVODTracker.currentVideoId) {
+        if (video && videoId && !alreadyBound) {
             // Video changed or new video detected
+            if (window.KickVODTracker.pendingListeners) {
+                window.KickVODTracker.pendingListeners();
+                window.KickVODTracker.pendingListeners = null;
+            }
             if (window.KickVODTracker.currentVideoTimeHandler) {
-                window.KickVODTracker.currentVideoTimeHandler.element.removeEventListener('timeupdate', window.KickVODTracker.currentVideoTimeHandler.handler);
+                const previous = window.KickVODTracker.currentVideoTimeHandler;
+                previous.element.removeEventListener('timeupdate', previous.handler);
+                previous.element.removeEventListener('seeking', previous.seekingHandler);
+                previous.element.removeEventListener('seeked', previous.seekedHandler);
                 window.KickVODTracker.currentVideoTimeHandler = null;
             }
             window.KickVODTracker.currentVideoId = videoId;
             window.KickVODTracker.isLoadingVideo = videoId;
             window.KickVODTracker.loadedVideoId = null;
+            window.KickVODTracker.boundElement = video;
             
             chrome.storage.local.get(['timestamps'], (result) => {
-                const currentVideo = document.querySelector("#video-player");
+                const currentVideo = findPlayerVideo();
                 const currentVideoId = getVideoId(window.location.href);
                 
                 debugLog("[Kick VODS] Loading video:", currentVideoId);
@@ -270,47 +311,89 @@ function trackVODTimeFunction() {
 
                     window.KickVODTracker.pendingListeners = cleanup;
 
-                    // Add a timeout fallback in case playing never fires
-                    fallbackTimeout = setTimeout(() => {
-                        if (!hasInitialized) {
-                            debugLog("[Kick VODS] Fallback triggered - playing event didn't fire, using canplay");
-                            if (currentVideo.readyState >= 2) {
+                    // Kick's player seeks on startup and then fires `playing`.
+                    // Setting currentTime also fires `playing` again, so this
+                    // listener has to be one-shot or the restore seek loops.
+                    // If playback already started, `playing` will not fire again.
+                    const alreadyPlaying = currentVideo.readyState >= 2 && !currentVideo.paused;
+                    if (alreadyPlaying) {
+                        debugLog("[Kick VODS] Video already playing, restoring immediately");
+                        onPlaying();
+                    } else {
+                        fallbackTimeout = setTimeout(() => {
+                            if (!hasInitialized && currentVideo.readyState >= 2) {
+                                debugLog("[Kick VODS] Fallback triggered - playing event didn't fire");
                                 onPlaying();
                             }
-                        }
-                    }, 5000);
+                        }, 5000);
 
-                    currentVideo.addEventListener('canplay', onCanPlay);
-                    currentVideo.addEventListener('play', onPlay);
-                    currentVideo.addEventListener('playing', onPlaying);
+                        currentVideo.addEventListener('canplay', onCanPlay);
+                        currentVideo.addEventListener('play', onPlay);
+                        currentVideo.addEventListener('playing', onPlaying);
+                    }
                 }
             });
         } else if ((!video || !videoId) && window.KickVODTracker.currentVideoTimeHandler) {
             clearCurrentTracking();
         }
+    };
+
+    const observer = new MutationObserver(() => {
+        try {
+            syncFromDom();
+        } catch (error) {
+            console.error("[Kick VODS] Failed to sync after a DOM change:", error);
+        }
     });
+    const attachObserver = () => {
+        const root = document.documentElement || document.body;
+        if (!root) return false;
+        observer.observe(root, { childList: true, subtree: true });
+        return true;
+    };
+    if (!attachObserver()) {
+        document.addEventListener('DOMContentLoaded', attachObserver, { once: true });
+    }
+    // MutationObserver does not report elements that are already in the document.
+    syncFromDom();
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Kick is a single-page app. Client navigations often reuse the same
+    // <video> and only then update the URL, so a childList observer never
+    // sees a new player. Watch the URL itself and bind whatever player is mounted.
+    const onNavigate = () => {
+        try {
+            syncFromDom();
+        } catch (error) {
+            console.error("[Kick VODS] Failed to sync after navigation:", error);
+        }
+    };
 
-    // Detect React navigation via History API
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
 
     history.pushState = function (...args) {
-        originalPushState.apply(this, args);
-        detectUrlChange();
+        const result = originalPushState.apply(this, args);
+        onNavigate();
+        return result;
     };
 
     history.replaceState = function (...args) {
-        originalReplaceState.apply(this, args);
-        detectUrlChange();
+        const result = originalReplaceState.apply(this, args);
+        onNavigate();
+        return result;
     };
 
-    // Listen for back/forward navigation
-    window.addEventListener('popstate', detectUrlChange);
+    window.addEventListener('popstate', onNavigate);
+    if (window.navigation) {
+        window.navigation.addEventListener('navigatesuccess', onNavigate);
+    }
+    // Next can call History.prototype.pushState and skip the instance patch above.
+    window.KickVODTracker.urlPoll = setInterval(onNavigate, 500);
 
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', clearCurrentTracking);
+    window.addEventListener('beforeunload', () => {
+        clearInterval(window.KickVODTracker.urlPoll);
+        clearCurrentTracking();
+    });
 }
 
 trackVODTimeFunction(); 
